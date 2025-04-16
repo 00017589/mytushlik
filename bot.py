@@ -756,9 +756,8 @@ def main():
 
     # Test attendance prompts immediately
     application.job_queue.run_once(send_attendance_request, 10)  # Runs after 10 seconds
-    application.job_queue.run_once(send_attendance_confirmation, 30)  # Runs after 30 seconds
-    application.job_queue.run_once(send_attendance_summary, 60)  # Runs after 60 seconds
-    
+    application.job_queue.run_once(send_attendance_summary, 120)  # Runs after 1200 seconds
+
     # Start the Bot
     application.run_polling()
 
