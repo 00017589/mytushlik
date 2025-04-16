@@ -30,15 +30,38 @@ PHONE, NAME = range(2)
 DATA_FILE = "data.json"
 ADMIN_FILE = "admins.json"
 
-# Initialize data structure
+# Global lunch menu options mapping (menu option number -> dish name)
+MENU_OPTIONS = {
+    "1": "Qovurma Lag'mon",
+    "2": "Teftel Jarkob",
+    "3": "Mastava",
+    "4": "Sho'rva",
+    "5": "Sokoro",
+    "6": "Do'lma",
+    "7": "Teftel sho'rva",
+    "8": "Suyuq lag'mon",
+    "9": "Osh",
+    "10": "Qovurma Makron",
+    "11": "Xonim"
+}
+
+# ---------------------- Data and Admin Initialization ---------------------- #
+
 def initialize_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     else:
-        return {"users": {}, "daily_attendance": {}, "attendance_history": {}}
+        data = {
+            "users": {},
+            "daily_attendance": {},
+            "attendance_history": {}
+        }
+    # Ensure kassa is present
+    if "kassa" not in data:
+        data["kassa"] = 0
+    return data
 
-# Initialize admin list
 def initialize_admins():
     if os.path.exists(ADMIN_FILE):
         with open(ADMIN_FILE, "r", encoding="utf-8") as f:
@@ -46,35 +69,31 @@ def initialize_admins():
     else:
         return {"admins": []}
 
-# Save data to file
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# Save admins to file
 def save_admins(admins):
     with open(ADMIN_FILE, "w", encoding="utf-8") as f:
         json.dump(admins, f)
 
-# Check if user is admin
 def is_admin(user_id, admins):
     return str(user_id) in admins["admins"]
 
 # ---------------------- User Registration Handlers ---------------------- #
 
-# Start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = str(update.effective_user.id)
     data = initialize_data()
 
     if user_id in data["users"]:
-        user_name = data["users"][user_id]["name"].split()[0]  # Get first name
+        user_name = data["users"][user_id]["name"].split()[0]  # First name
         await update.message.reply_text(
             f"👋 Salom, {user_name}!\n\nMy Tushlik botga qaytganingizdan xursandmiz! Quyidagi tugmalardan foydalanishingiz mumkin:",
             reply_markup=ReplyKeyboardMarkup(
                 [
                     ["🧾 Qarzimni tekshirish", "📊 Qatnashishlarim"],
-                    ["📝 Bugungi tushlik", "❓ Yordam"],
+                    ["❓ Yordam"],
                 ],
                 resize_keyboard=True,
             ),
@@ -91,7 +110,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     return PHONE
 
-# Phone number handler
 async def phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.contact:
         phone_number = update.message.contact.phone_number
@@ -103,14 +121,12 @@ async def phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Rahmat! Endi to'liq ismingizni kiriting (Masalan: Abdurahmonov Sardor).")
     return NAME
 
-# Name handler
 async def name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     full_name = update.message.text
     user_id = str(update.effective_user.id)
     context.user_data["name"] = full_name
 
     data = initialize_data()
-    # Register user
     data["users"][user_id] = {
         "name": full_name,
         "phone": context.user_data["phone"],
@@ -124,7 +140,7 @@ async def name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         reply_markup=ReplyKeyboardMarkup(
             [
                 ["🧾 Qarzimni tekshirish", "📊 Qatnashishlarim"],
-                ["📝 Bugungi tushlik", "❓ Yordam"],
+                ["❓ Yordam"],
             ],
             resize_keyboard=True,
         ),
@@ -133,14 +149,13 @@ async def name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 # ---------------------- Attendance Handlers ---------------------- #
 
-# Daily attendance request sender (scheduled)
+# Scheduled attendance request sender (morning)
 async def send_attendance_request(context: ContextTypes.DEFAULT_TYPE):
     data = initialize_data()
     today = datetime.datetime.now(TASHKENT_TZ).strftime("%Y-%m-%d")
-
-    # Initialize today's attendance data
     if today not in data["daily_attendance"]:
-        data["daily_attendance"][today] = {"confirmed": [], "declined": [], "pending": []}
+        # Initialize with an additional "menu" field to hold lunch selections
+        data["daily_attendance"][today] = {"confirmed": [], "declined": [], "pending": [], "menu": {}}
 
     keyboard = InlineKeyboardMarkup(
         [
@@ -153,12 +168,11 @@ async def send_attendance_request(context: ContextTypes.DEFAULT_TYPE):
 
     for user_id in data["users"]:
         try:
-            # Skip if user already responded
+            # Skip if already responded
             if (user_id in data["daily_attendance"][today]["confirmed"] or
                 user_id in data["daily_attendance"][today]["declined"]):
                 continue
 
-            # Add to pending if not already there
             if user_id not in data["daily_attendance"][today]["pending"]:
                 data["daily_attendance"][today]["pending"].append(user_id)
 
@@ -172,11 +186,10 @@ async def send_attendance_request(context: ContextTypes.DEFAULT_TYPE):
 
     save_data(data)
 
-# Daily attendance confirmation sender (scheduled)
+# Scheduled confirmation sender (morning)
 async def send_attendance_confirmation(context: ContextTypes.DEFAULT_TYPE):
     data = initialize_data()
     today = datetime.datetime.now(TASHKENT_TZ).strftime("%Y-%m-%d")
-
     if today not in data["daily_attendance"]:
         return
 
@@ -190,7 +203,7 @@ async def send_attendance_confirmation(context: ContextTypes.DEFAULT_TYPE):
         ]
     )
 
-    # Send confirmation only to users who initially confirmed
+    # Send confirmation only to users who initially confirmed (after selecting menu)
     for user_id in data["daily_attendance"][today]["confirmed"]:
         try:
             await context.bot.send_message(
@@ -201,38 +214,40 @@ async def send_attendance_confirmation(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Failed to send attendance confirmation to user {user_id}: {e}")
 
-# Daily attendance summary sender (scheduled)
+# Scheduled summary sender (10:00 AM)
 async def send_attendance_summary(context: ContextTypes.DEFAULT_TYPE):
     data = initialize_data()
     admins = initialize_admins()
     today = datetime.datetime.now(TASHKENT_TZ).strftime("%Y-%m-%d")
-
     if today not in data["daily_attendance"]:
         return
 
     confirmed_count = len(data["daily_attendance"][today]["confirmed"])
-    confirmed_names = [
-        data["users"][uid]["name"] for uid in data["daily_attendance"][today]["confirmed"] if uid in data["users"]
-    ]
-
     summary = f"🍽️ {today} - Tushlik qatnashuvchilar soni: {confirmed_count}\n\n"
-    if confirmed_names:
+    if confirmed_count:
         summary += "✅ Qatnashuvchilar:\n"
-        for i, name in enumerate(confirmed_names, 1):
-            summary += f"{i}. {name}\n"
+        i = 1
+        for uid in data["daily_attendance"][today]["confirmed"]:
+            name = data["users"][uid]["name"] if uid in data["users"] else "Noma'lum"
+            dish_num = data["daily_attendance"][today].get("menu", {}).get(uid, "N/A")
+            dish_name = MENU_OPTIONS.get(dish_num, "N/A") if dish_num != "N/A" else "N/A"
+            summary += f"{i}. {name} - {dish_name}\n"
+            i += 1
     else:
         summary += "❌ Bugun qatnashuvchilar yo'q."
 
-    # Update debts for confirmed users
+    # Update debts and kassa for confirmed users
     for user_id in data["daily_attendance"][today]["confirmed"]:
         if user_id in data["users"]:
             data["users"][user_id]["debt"] += 25000
+            data["kassa"] += 25000
 
-    # Save attendance to history
+    # Save attendance history
     if today not in data["attendance_history"]:
         data["attendance_history"][today] = {
             "confirmed": data["daily_attendance"][today]["confirmed"].copy(),
             "declined": data["daily_attendance"][today]["declined"].copy(),
+            "menu": data["daily_attendance"][today].get("menu", {}).copy()
         }
 
     save_data(data)
@@ -244,7 +259,7 @@ async def send_attendance_summary(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Failed to send attendance summary to admin {admin_id}: {e}")
 
-# Callback query handler for attendance and confirmations
+# Callback query handler for attendance, confirmations, and lunch menu selection
 async def attendance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -252,28 +267,54 @@ async def attendance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = str(query.from_user.id)
     callback_data = query.data
 
-    # Process attendance response
+    # Process attendance responses (yes/no)
     if callback_data.startswith("attendance_"):
         action, date = callback_data.replace("attendance_", "").split("_")
         if date not in data["daily_attendance"]:
-            data["daily_attendance"][date] = {"confirmed": [], "declined": [], "pending": []}
+            data["daily_attendance"][date] = {"confirmed": [], "declined": [], "pending": [], "menu": {}}
 
-        # Remove user from pending and any existing list to avoid duplication
-        if user_id in data["daily_attendance"][date]["pending"]:
-            data["daily_attendance"][date]["pending"].remove(user_id)
-        if user_id in data["daily_attendance"][date]["confirmed"]:
-            data["daily_attendance"][date]["confirmed"].remove(user_id)
-        if user_id in data["daily_attendance"][date]["declined"]:
-            data["daily_attendance"][date]["declined"].remove(user_id)
+        # Remove user from pending and any list to avoid duplication
+        for lst in [data["daily_attendance"][date]["pending"],
+                    data["daily_attendance"][date]["confirmed"],
+                    data["daily_attendance"][date]["declined"]]:
+            if user_id in lst:
+                lst.remove(user_id)
 
         if action == "yes":
-            data["daily_attendance"][date]["confirmed"].append(user_id)
-            await query.edit_message_text("Rahmat! Tushlikda ko'rishguncha.")
+            # Instead of immediately confirming attendance, show lunch menu selection
+            menu_keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("1. Qovurma Lag'mon", callback_data=f"menu_1_{date}"),
+                        InlineKeyboardButton("2. Teftel Jarkob", callback_data=f"menu_2_{date}")
+                    ],
+                    [
+                        InlineKeyboardButton("3. Mastava", callback_data=f"menu_3_{date}"),
+                        InlineKeyboardButton("4. Sho'rva", callback_data=f"menu_4_{date}")
+                    ],
+                    [
+                        InlineKeyboardButton("5. Sokoro", callback_data=f"menu_5_{date}"),
+                        InlineKeyboardButton("6. Do'lma", callback_data=f"menu_6_{date}")
+                    ],
+                    [
+                        InlineKeyboardButton("7. Teftel sho'rva", callback_data=f"menu_7_{date}"),
+                        InlineKeyboardButton("8. Suyuq lag'mon", callback_data=f"menu_8_{date}")
+                    ],
+                    [
+                        InlineKeyboardButton("9. Osh", callback_data=f"menu_9_{date}"),
+                        InlineKeyboardButton("10. Qovurma Makron", callback_data=f"menu_10_{date}")
+                    ],
+                    [
+                        InlineKeyboardButton("11. Xonim", callback_data=f"menu_11_{date}")
+                    ]
+                ]
+            )
+            await query.edit_message_text("Iltimos, menyudan tanlang:", reply_markup=menu_keyboard)
         elif action == "no":
             data["daily_attendance"][date]["declined"].append(user_id)
             await query.edit_message_text("Tushlik uchun javobingiz qayd etildi.")
 
-    # Process confirmation response
+    # Process confirmation responses (after menu selection)
     elif callback_data.startswith("confirmation_"):
         action, date = callback_data.replace("confirmation_", "").split("_")
         if date not in data["daily_attendance"]:
@@ -294,24 +335,41 @@ async def attendance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 data["daily_attendance"][date]["declined"].remove(user_id)
             if user_id not in data["daily_attendance"][date]["pending"]:
                 data["daily_attendance"][date]["pending"].append(user_id)
-            # Ask again
+            if "menu" in data["daily_attendance"][date] and user_id in data["daily_attendance"][date]["menu"]:
+                del data["daily_attendance"][date]["menu"][user_id]
             keyboard = InlineKeyboardMarkup(
                 [
                     [
                         InlineKeyboardButton("Ha ✅", callback_data=f"attendance_yes_{date}"),
-                        InlineKeyboardButton("Yo'q ❌", callback_data=f"attendance_no_{date}"),
+                        InlineKeyboardButton("Yo'q ❌", callback_data=f"attendance_no_{date}")
                     ]
                 ]
             )
-            await query.edit_message_text(
-                text="Bugun tushlikka qatnashasizmi? (25,000 so'm)", reply_markup=keyboard
-            )
+            await query.edit_message_text("Bugun tushlikka qatnashasizmi? (25,000 so'm)", reply_markup=keyboard)
+
+    # Process lunch menu selection callbacks
+    elif callback_data.startswith("menu_"):
+        parts = callback_data.split("_")
+        if len(parts) >= 3:
+            dish_number = parts[1]
+            date = parts[2]
+            # Ensure "menu" key is initialized
+            data["daily_attendance"].setdefault(date, {"confirmed": [], "declined": [], "pending": [], "menu": {}})
+            # Add user to confirmed if not already
+            if user_id not in data["daily_attendance"][date]["confirmed"]:
+                data["daily_attendance"][date]["confirmed"].append(user_id)
+            data["daily_attendance"][date].setdefault("menu", {})[user_id] = dish_number
+            dish_name = MENU_OPTIONS.get(dish_number, "N/A")
+            await query.edit_message_text(f"Siz tanladingiz: {dish_name}")
+        else:
+            await query.edit_message_text("Noto'g'ri tanlov.")
 
     save_data(data)
 
+# ---------------------- Scheduling Functions ---------------------- #
+
 def schedule_morning_attendance_check(app):
     now = datetime.datetime.now(TASHKENT_TZ)
-    # Set time for morning attendance request: 7:00 AM Tashkent time
     target_time = now.replace(hour=7, minute=0, second=0, microsecond=0)
     if now > target_time:
         target_time += datetime.timedelta(days=1)
@@ -319,10 +377,8 @@ def schedule_morning_attendance_check(app):
     app.job_queue.run_once(send_attendance_request, seconds_until_target)
     app.job_queue.run_daily(send_attendance_request, time=datetime.time(hour=7, minute=0, second=0, tzinfo=TASHKENT_TZ))
 
-
 def schedule_confirmation_check(app):
     now = datetime.datetime.now(TASHKENT_TZ)
-    # Set time for confirmation prompt: 9:00 AM Tashkent time
     target_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
     if now > target_time:
         target_time += datetime.timedelta(days=1)
@@ -330,10 +386,8 @@ def schedule_confirmation_check(app):
     app.job_queue.run_once(send_attendance_confirmation, seconds_until_target)
     app.job_queue.run_daily(send_attendance_confirmation, time=datetime.time(hour=9, minute=0, second=0, tzinfo=TASHKENT_TZ))
 
-
 def schedule_summary_report(app):
     now = datetime.datetime.now(TASHKENT_TZ)
-    # Update target time to 10:00 AM for the final list
     target_time = now.replace(hour=10, minute=0, second=0, microsecond=0)
     if now > target_time:
         target_time += datetime.timedelta(days=1)
@@ -341,10 +395,8 @@ def schedule_summary_report(app):
     app.job_queue.run_once(send_attendance_summary, seconds_until_target)
     app.job_queue.run_daily(send_attendance_summary, time=datetime.time(hour=10, minute=0, second=0, tzinfo=TASHKENT_TZ))
 
-
 # ---------------------- Debt and Attendance Check ---------------------- #
 
-# Check debt command handler
 async def check_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     data = initialize_data()
@@ -354,7 +406,6 @@ async def check_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     debt = data["users"][user_id]["debt"]
     await update.message.reply_text(f"Sizning qarzingiz: {debt:,} so'm")
 
-# Check attendance command handler
 async def check_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     data = initialize_data()
@@ -375,12 +426,29 @@ async def check_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------------- Admin Commands ---------------------- #
 
-# Make admin command handler
+# New function to list all users (for admin "Foydalanuvchilar" button)
+async def view_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    admins = initialize_admins()
+    if user_id not in admins["admins"]:
+        await update.message.reply_text("Siz admin emassiz.")
+        return
+    data = initialize_data()
+    if not data["users"]:
+        await update.message.reply_text("Foydalanuvchilar ro'yxati bo'sh.")
+        return
+    message = "👥 Foydalanuvchilar ro'yxati:\n\n"
+    i = 1
+    for uid, info in data["users"].items():
+        message += f"{i}. ID: {uid}, Ism: {info['name']}, Telefon: {info['phone']}\n"
+        i += 1
+    await update.message.reply_text(message)
+
+# Existing command: First user to run becomes admin; subsequent usage adds new admin.
 async def make_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     admins = initialize_admins()
 
-    # First user to run this command becomes admin
     if not admins["admins"]:
         admins["admins"].append(user_id)
         save_admins(admins)
@@ -410,7 +478,6 @@ async def make_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Siz admin emassiz.")
 
-# Remove admin command handler
 async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     admins = initialize_admins()
@@ -435,7 +502,7 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Failed to notify removed admin: {e}")
     await update.message.reply_text(f"Foydalanuvchi {admin_to_remove} admin ro'yxatidan o'chirildi.")
 
-# Reset debt command handler (for individual or all users)
+# Modified debt reset (unchanged logic)
 async def reset_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     admins = initialize_admins()
@@ -443,7 +510,6 @@ async def reset_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Siz admin emassiz.")
         return
     data = initialize_data()
-    # Reset individual user's debt if argument is given
     if context.args:
         target_id = context.args[0]
         if target_id not in data["users"]:
@@ -469,7 +535,7 @@ async def reset_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text("Hamma foydalanuvchilarning qarzlarini nolga tushirishni xohlayapsizmi?", reply_markup=keyboard)
 
-# Modify debt command handler
+# Modified debt modification to allow additions and subtractions.
 async def modify_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     admins = initialize_admins()
@@ -477,29 +543,34 @@ async def modify_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Siz admin emassiz.")
         return
     if len(context.args) < 2:
-        await update.message.reply_text("Noto'g'ri format. Quyidagi formatda yuboring:\n/qarz_ozgartirish [foydalanuvchi_id] [summa]")
+        await update.message.reply_text("Noto'g'ri format. Quyidagi formatda yuboring:\n/qarz_ozgartirish [foydalanuvchi_id] [+/-summa]")
         return
     target_id = context.args[0]
-    try:
-        amount = int(context.args[1])
-    except ValueError:
-        await update.message.reply_text("Summa raqam bo'lishi kerak.")
-        return
+    change_str = context.args[1]
     data = initialize_data()
     if target_id not in data["users"]:
         await update.message.reply_text("Bu foydalanuvchi topilmadi.")
         return
-    old_debt = data["users"][target_id]["debt"]
-    data["users"][target_id]["debt"] = amount
-    save_data(data)
-    user_name = data["users"][target_id]["name"]
-    await update.message.reply_text(f"{user_name} ning qarzi {old_debt:,} so'mdan {amount:,} so'mga o'zgartirildi.")
     try:
-        await context.bot.send_message(chat_id=target_id, text=f"Sizning qarzingiz administrator tomonidan {old_debt:,} so'mdan {amount:,} so'mga o'zgartirildi.")
-    except Exception as e:
-        logger.error(f"Failed to notify user about debt modification: {e}")
+        old_debt = data["users"][target_id]["debt"]
+        # If the change string starts with '+' or '-', add/subtract from current debt.
+        if change_str.startswith('+') or change_str.startswith('-'):
+            change = int(change_str)
+            new_debt = old_debt + change
+        else:
+            # If no sign is provided, treat it as a replacement.
+            new_debt = int(change_str)
+        data["users"][target_id]["debt"] = new_debt
+        save_data(data)
+        user_name = data["users"][target_id]["name"]
+        await update.message.reply_text(f"{user_name} ning qarzi {old_debt:,} so'mdan {new_debt:,} so'mga o'zgartirildi.")
+        try:
+            await context.bot.send_message(chat_id=target_id, text=f"Sizning qarzingiz administrator tomonidan {old_debt:,} so'mdan {new_debt:,} so'mga o'zgartirildi.")
+        except Exception as e:
+            logger.error(f"Failed to notify user about debt modification: {e}")
+    except ValueError:
+        await update.message.reply_text("Summa raqam bo'lishi kerak.")
 
-# View all debts command handler
 async def view_all_debts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     admins = initialize_admins()
@@ -518,7 +589,19 @@ async def view_all_debts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message += f"\n💰 Jami qarz: {total_debt:,} so'm"
     await update.message.reply_text(message)
 
-# View today's attendance command handler
+# New function: View "Kassa" (available money for going market)
+async def view_kassa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    admins = initialize_admins()
+    if user_id not in admins["admins"]:
+        await update.message.reply_text("Siz admin emassiz.")
+        return
+    data = initialize_data()
+    balance = data.get("kassa", 0)
+    sign = "+" if balance >= 0 else ""
+    message = f"Kassa: {sign}{balance:,} so'm"
+    await update.message.reply_text(message)
+
 async def view_today_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     admins = initialize_admins()
@@ -537,7 +620,6 @@ async def view_today_attendance(update: Update, context: ContextTypes.DEFAULT_TY
     message += f"⏳ Javob bermaganlar ({len(pending_users)}):\n" + ("\n".join(f"{i}. {name}" for i, name in enumerate(pending_users, 1)) if pending_users else "Hech kim yo'q")
     await update.message.reply_text(message)
 
-# Callback handler for debt reset confirmation
 async def debt_reset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -557,7 +639,6 @@ async def debt_reset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await query.edit_message_text("Qarzlarni nolga tushirish bekor qilindi.")
 
-# Export data command handler
 async def export_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     admins = initialize_admins()
@@ -589,7 +670,6 @@ async def export_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Failed to send export file: {e}")
         await update.message.reply_text("Ma'lumotlarni eksport qilishda xatolik yuz berdi.")
 
-# Remind debtors command handler
 async def remind_debtors(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     admins = initialize_admins()
@@ -614,7 +694,6 @@ async def remind_debtors(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ {sent_count} ta foydalanuvchiga eslatma yuborildi.\n❌ {failed_count} ta foydalanuvchiga eslatma yuborib bo'lmadi."
     )
 
-# Help command handler
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     admins = initialize_admins()
@@ -630,11 +709,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message += "/admin_ochirish [id] - Adminni o'chirish\n"
         message += "/qarz_nol - Barcha qarzlarni nolga tushirish\n"
         message += "/qarz_nol [id] - Foydalanuvchi qarzini nolga tushirish\n"
-        message += "/qarz_ozgartirish [id] [summa] - Qarzni o'zgartirish\n"
+        message += "/qarz_ozgartirish [id] [+/-summa] - Qarzni qo'shish/ayirish yoki almashtirish\n"
         message += "/qarzlar - Barcha qarzlarni ko'rish\n"
         message += "/bugun - Bugungi qatnashuvchilarni ko'rish\n"
         message += "/eksport - Ma'lumotlarni eksport qilish\n"
         message += "/eslatma - Qarzdorlarga eslatma yuborish\n"
+        message += "/kassa - Kassa balansini ko'rish\n"
     await update.message.reply_text(message)
 
 # ---------------------- Keyboard Functions ---------------------- #
@@ -646,6 +726,7 @@ async def show_admin_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE
             [
                 ["👥 Foydalanuvchilar", "💰 Barcha qarzlar"],
                 ["📊 Bugungi qatnashish", "🔄 Qarzlarni nollash"],
+                ["Kassa"],
                 ["⬅️ Asosiy menyu", "❓ Yordam"],
             ],
             resize_keyboard=True,
@@ -659,13 +740,12 @@ async def show_regular_keyboard(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup=ReplyKeyboardMarkup(
             [
                 ["🧾 Qarzimni tekshirish", "📊 Qatnashishlarim"],
-                ["📝 Bugungi tushlik", admin_button],
+                [admin_button],
             ],
             resize_keyboard=True,
         ),
     )
 
-# Dedicated async function to handle admin panel request
 async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_admin(str(update.effective_user.id), initialize_admins()):
         await show_admin_keyboard(update, context)
@@ -692,21 +772,18 @@ def main():
     )
     application.add_handler(conv_handler)
     
-
     # Add message handlers for user options
     application.add_handler(MessageHandler(filters.Regex("^🧾 Qarzimni tekshirish$"), check_debt))
     application.add_handler(MessageHandler(filters.Regex("^📊 Qatnashishlarim$"), check_attendance))
-    application.add_handler(MessageHandler(filters.Regex("^📝 Bugungi tushlik$"), 
-                                           lambda update, context: context.bot.send_message(
-                                               chat_id=update.effective_chat.id,
-                                               text="Bugungi tushlik haqida so'rov yuborildi!"
-                                           )))
     application.add_handler(MessageHandler(filters.Regex("^❓ Yordam$"), help_command))
     application.add_handler(MessageHandler(filters.Regex("^👑 Admin panel$"), admin_panel_handler))
-    application.add_handler(MessageHandler(filters.Regex("^👥 Foydalanuvchilar$"), view_all_debts))
+    # Use the new handler for viewing users in admin panel
+    application.add_handler(MessageHandler(filters.Regex("^👥 Foydalanuvchilar$"), view_users))
     application.add_handler(MessageHandler(filters.Regex("^💰 Barcha qarzlar$"), view_all_debts))
     application.add_handler(MessageHandler(filters.Regex("^📊 Bugungi qatnashish$"), view_today_attendance))
     application.add_handler(MessageHandler(filters.Regex("^🔄 Qarzlarni nollash$"), reset_debt))
+    # New handler for Kassa
+    application.add_handler(MessageHandler(filters.Regex("^Kassa$"), view_kassa))
     application.add_handler(MessageHandler(filters.Regex("^⬅️ Asosiy menyu$"), show_regular_keyboard))
 
     # Add command handlers
@@ -722,9 +799,10 @@ def main():
     application.add_handler(CommandHandler("eksport", export_data))
     application.add_handler(CommandHandler("eslatma", remind_debtors))
     application.add_handler(CommandHandler("yordam", help_command))
+    application.add_handler(CommandHandler("kassa", view_kassa))
 
-    # Callback query handlers
-    application.add_handler(CallbackQueryHandler(attendance_callback, pattern="^(attendance_|confirmation_)"))
+    # Callback query handler (for attendance, confirmation, and lunch menu selection)
+    application.add_handler(CallbackQueryHandler(attendance_callback, pattern="^(attendance_|confirmation_|menu_)"))
     application.add_handler(CallbackQueryHandler(debt_reset_callback, pattern="^reset_all_debts_"))
 
     # Schedule jobs
@@ -735,7 +813,5 @@ def main():
     # Start the Bot
     application.run_polling()
 
-
 if __name__ == "__main__":
     main()
-
