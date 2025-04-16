@@ -1,0 +1,25 @@
+{
+    "users": {
+        "5192568051": {
+            "name": "Po'latjon Baxtiyorov",
+            "phone": "+998956850363",
+            "debt": 25000,
+            "registration_date": "2025-04-16 11:46:32"
+        }
+    },
+    "daily_attendance": {
+        "2025-04-16": {
+            "confirmed": [
+                "5192568051"
+            ],
+            "declined": [],
+            "pending": []
+        }
+    },
+    "attendance_history": {
+        "2025-04-16": {
+            "confirmed": [],
+            "declined": []
+        }
+    }
+}
