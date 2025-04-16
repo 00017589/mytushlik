@@ -777,7 +777,7 @@ async def scheduled_low_balance_notification(context: ContextTypes.DEFAULT_TYPE)
 # ---------------------- Main Function ---------------------- #
 
 def main():
-    token = 7827859748:AAEDW4Dlmv49bGwps2-OyPcLS_ysEn4TmPU  # Replace with your token
+    token = "7827859748:AAEDW4Dlmv49bGwps2-OyPcLS_ysEn4TmPU"  # Replace with your token
     application = Application.builder().token(token).build()
 
     # Registration conversation
