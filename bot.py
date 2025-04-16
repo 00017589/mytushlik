@@ -25,7 +25,7 @@ TASHKENT_TZ = pytz.timezone("Asia/Tashkent")
 
 # Conversation states for registration
 PHONE, NAME = range(2)
-# Conversation states for admin balance modification (modify user's balance)
+# Conversation states for admin balance modification
 ADMIN_BALANCE_SELECT_USER, ADMIN_BALANCE_ENTER_AMOUNT = range(100, 102)
 # Conversation states for admin daily price adjustment
 ADMIN_DAILY_PRICE_SELECT_USER, ADMIN_DAILY_PRICE_ENTER_AMOUNT = range(102, 104)
@@ -57,7 +57,7 @@ def initialize_data():
             data = json.load(f)
     else:
         data = {
-            "users": {},  # Each user record will include "balance" and optionally "daily_price"
+            "users": {},  # Each user record includes "balance" and optionally "daily_price"
             "daily_attendance": {},
             "attendance_history": {}
         }
@@ -88,7 +88,6 @@ def is_admin(user_id, admins):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = str(update.effective_user.id)
     data = initialize_data()
-
     if user_id in data["users"]:
         user_name = data["users"][user_id]["name"].split()[0]
         await update.message.reply_text(
@@ -131,8 +130,8 @@ async def name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     data["users"][user_id] = {
         "name": full_name,
         "phone": context.user_data["phone"],
-        "balance": 0,                # initial balance is 0
-        # "daily_price" is optional; default cost will be 25,000 if not set
+        "balance": 0,      # initial balance is 0
+        # "daily_price" is optional; default 25,000 will be used if not set
         "registration_date": datetime.datetime.now(TASHKENT_TZ).strftime("%Y-%m-%d %H:%M:%S")
     }
     save_data(data)
@@ -151,10 +150,10 @@ async def name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 # ---------------------- Attendance Handlers ---------------------- #
 
-# Sends out the lunch survey (only on weekdays)
-async def send_attendance_request(context: ContextTypes.DEFAULT_TYPE):
+# The survey function now accepts a test parameter to bypass weekday checking when testing
+async def send_attendance_request(context: ContextTypes.DEFAULT_TYPE, test: bool = False):
     now = datetime.datetime.now(TASHKENT_TZ)
-    if now.weekday() >= 5:  # Skip weekends
+    if not test and now.weekday() >= 5:  # Only send on weekdays when not testing
         return
     data = initialize_data()
     today = now.strftime("%Y-%m-%d")
@@ -183,7 +182,7 @@ async def send_attendance_request(context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to send attendance request to user {uid}: {e}")
     save_data(data)
 
-# Sends out the summary of today's lunch attendance (only on weekdays)
+# Scheduled summary sender (only on weekdays)
 async def send_attendance_summary(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.now(TASHKENT_TZ)
     if now.weekday() >= 5:
@@ -205,7 +204,7 @@ async def send_attendance_summary(context: ContextTypes.DEFAULT_TYPE):
             i += 1
     else:
         summary += "❌ Bugun tushlik qatnashuvchilar yo'q."
-    # Deduct daily price (or default 25,000) from each confirmed user's balance and add to kassa
+    # Deduct each confirmed user's daily price (defaulting to 25,000 if not set) from their balance and add to kassa
     for uid in confirmed:
         if uid in data["users"]:
             price = data["users"][uid].get("daily_price", 25000)
@@ -275,7 +274,7 @@ async def attendance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text("Noto'g'ri tanlov.")
     save_data(data)
 
-# Users can cancel their lunch (allowed only before 9:59)
+# Users can cancel their lunch (allowed until 9:59)
 async def cancel_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.now(TASHKENT_TZ)
     if now.hour > 9 or (now.hour == 9 and now.minute >= 59):
@@ -299,7 +298,7 @@ async def cancel_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------- Admin Balance Modification Conversation ---------------------- #
 
 async def start_balance_modification(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    action_text = update.message.text  # Expected "Balans qo'shish" or "Balans kamaytirish"
+    action_text = update.message.text  # Should be "Balans qo'shish" or "Balans kamaytirish"
     if action_text == "Balans qo'shish":
         context.user_data["balance_action"] = "add"
     elif action_text == "Balans kamaytirish":
@@ -364,7 +363,6 @@ async def cancel_balance_modification(update: Update, context: ContextTypes.DEFA
 # ---------------------- Admin Daily Price Adjustment Conversation ---------------------- #
 
 async def start_daily_price_modification(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This function is triggered by pressing the "Kunlik narx" button in admin panel.
     data = initialize_data()
     if not data["users"]:
         await update.message.reply_text("Foydalanuvchilar ro'yxati bo'sh.")
@@ -414,7 +412,7 @@ async def cancel_daily_price_modification(update: Update, context: ContextTypes.
 
 # ---------------------- Admin & General User Commands ---------------------- #
 
-# For general users: shows current balance with sign and emoji
+# For general users: check balance
 async def check_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     data = initialize_data()
@@ -424,8 +422,8 @@ async def check_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bal = data["users"][uid]["balance"]
     sign = "+" if bal >= 0 else ""
     await update.message.reply_text(f"Sizning balansingiz: {sign}{bal:,} so'm")
-    
-# For regular users: show personal attendance history (unchanged)
+
+# For general users: personal attendance history
 async def check_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     data = initialize_data()
@@ -438,18 +436,19 @@ async def check_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if uid in rec.get("confirmed", []):
             count += 1
             history += f"✅ {date}\n"
-    await update.message.reply_text(
-        f"Siz jami {count} marta tushlikda qatnashgansiz.\n\nTarix:\n{history or 'Ma\'lumot topilmadi.'}"
-    )
+    await update.message.reply_text(f"Siz jami {count} marta tushlikda qatnashgansiz.\n\nTarix:\n{history or 'Ma\'lumot topilmadi.'}")
 
-# Admin: List only registered bot users (without attendance info)
+# Admin: List all registered users (only those who have completed /start)
 async def view_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     admins = initialize_admins()
+    data = initialize_data()
     if uid not in admins["admins"]:
         await update.message.reply_text("Siz admin emassiz.")
         return
-    data = initialize_data()
+    if uid not in data["users"]:
+        await update.message.reply_text("Iltimos, avvalo /start orqali ro'yxatdan o'ting.")
+        return
     if not data.get("users"):
         await update.message.reply_text("Foydalanuvchilar ro'yxati bo'sh.")
         return
@@ -464,10 +463,10 @@ async def view_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def view_attendance_today_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     admins = initialize_admins()
+    data = initialize_data()
     if uid not in admins["admins"]:
         await update.message.reply_text("Siz admin emassiz.")
         return
-    data = initialize_data()
     today = datetime.datetime.now(TASHKENT_TZ).strftime("%Y-%m-%d")
     if today not in data["daily_attendance"]:
         await update.message.reply_text("Bugun tushlik ma'lumotlari topilmadi.")
@@ -487,14 +486,14 @@ async def view_attendance_today_admin(update: Update, context: ContextTypes.DEFA
             i += 1
     await update.message.reply_text(msg)
 
-# Admin: View all users’ balances (sorted)
+# Admin: View all users' balances (sorted)
 async def view_all_balances(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     admins = initialize_admins()
+    data = initialize_data()
     if uid not in admins["admins"]:
         await update.message.reply_text("Siz admin emassiz.")
         return
-    data = initialize_data()
     sorted_users = sorted(data["users"].items(), key=lambda x: x[1]["balance"])
     total_balance = sum(info["balance"] for _, info in sorted_users)
     msg = "📊 BALANSLAR RO'YXATI:\n\n"
@@ -509,22 +508,22 @@ async def view_all_balances(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def view_kassa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     admins = initialize_admins()
+    data = initialize_data()
     if uid not in admins["admins"]:
         await update.message.reply_text("Siz admin emassiz.")
         return
-    data = initialize_data()
     bal = data.get("kassa", 0)
     sign = "+" if bal >= 0 else ""
     await update.message.reply_text(f"Kassa: {sign}{bal:,} so'm")
 
-# Admin: Reset all users’ balances to zero
+# Admin: Reset balances (either individual by argument or all via inline keyboard)
 async def reset_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     admins = initialize_admins()
+    data = initialize_data()
     if uid not in admins["admins"]:
         await update.message.reply_text("Siz admin emassiz.")
         return
-    data = initialize_data()
     if context.args:
         target_id = context.args[0]
         if target_id not in data["users"]:
@@ -560,13 +559,53 @@ async def balance_reset_callback(update: Update, context: ContextTypes.DEFAULT_T
     else:
         await query.edit_message_text("Balanslarni nolga tushirish bekor qilindi.")
 
-# Admin: Modify balance conversation (Balans qo'shish / Balans kamaytirish)
-# Handled by start_balance_modification, balance_mod_select_user_callback, balance_mod_enter_amount
-# (See above)
+# Admin: Daily Price Adjustment Conversation (for setting a user’s lunch price)
+async def start_daily_price_modification(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = initialize_data()
+    if not data["users"]:
+        await update.message.reply_text("Foydalanuvchilar ro'yxati bo'sh.")
+        return ConversationHandler.END
+    kb = []
+    for user_id, info in data["users"].items():
+        button = InlineKeyboardButton(f"{info['name']} ({user_id})", callback_data=f"price_mod_{user_id}")
+        kb.append([button])
+    await update.message.reply_text("Iltimos, kunlik narxni o'zgartirmoqchi bo'lgan foydalanuvchini tanlang:", reply_markup=InlineKeyboardMarkup(kb))
+    return ADMIN_DAILY_PRICE_SELECT_USER
 
-# Admin: Daily Price Adjustment conversation (Kunlik narx)
-# Handled by start_daily_price_modification, daily_price_mod_select_user_callback, daily_price_mod_enter_amount
-# (See above)
+async def daily_price_mod_select_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_", 2)
+    if len(parts) < 3:
+        await query.edit_message_text("Noto'g'ri tanlov.")
+        return ConversationHandler.END
+    target_id = parts[2]
+    context.user_data["price_target_id"] = target_id
+    await query.edit_message_text("Iltimos, yangi kunlik narxni kiriting (soumlarda, masalan: 20000):")
+    return ADMIN_DAILY_PRICE_ENTER_AMOUNT
+
+async def daily_price_mod_enter_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        price = int(update.message.text)
+        if price < 0:
+            await update.message.reply_text("Iltimos, musbat narx kiriting.")
+            return ADMIN_DAILY_PRICE_ENTER_AMOUNT
+    except ValueError:
+        await update.message.reply_text("Iltimos, to'g'ri narx kiriting.")
+        return ADMIN_DAILY_PRICE_ENTER_AMOUNT
+    data = initialize_data()
+    target_id = context.user_data.get("price_target_id")
+    if not target_id or target_id not in data["users"]:
+        await update.message.reply_text("Foydalanuvchi topilmadi.")
+        return ConversationHandler.END
+    data["users"][target_id]["daily_price"] = price
+    save_data(data)
+    await update.message.reply_text(f"{data['users'][target_id]['name']} ning kunlik narxi {price:,} so'mga o'zgartirildi.")
+    return ConversationHandler.END
+
+async def cancel_daily_price_modification(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Kunlik narx o'zgarishi bekor qilindi.")
+    return ConversationHandler.END
 
 # Admin: Make admin
 async def make_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -639,11 +678,7 @@ async def export_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "export_date": datetime.datetime.now(TASHKENT_TZ).strftime("%Y-%m-%d %H:%M:%S")
     }
     for user_id, info in data["users"].items():
-        exp["users"][user_id] = {
-            "name": info["name"],
-            "phone": info["phone"],
-            "balance": info["balance"]
-        }
+        exp["users"][user_id] = {"name": info["name"], "phone": info["phone"], "balance": info["balance"]}
         exp["total_balance"] += info["balance"]
     export_file = "export.json"
     with open(export_file, "w", encoding="utf-8") as f:
@@ -657,28 +692,26 @@ async def export_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Failed to send export file: {e}")
         await update.message.reply_text("Ma'lumotlarni eksport qilishda xatolik yuz berdi.")
 
-# Admin: Remind users with low balance (< 100,000) 
+# Admin: Remind users with low balance (< 100,000) [once per day]
 async def send_low_balance_notifications(context: ContextTypes.DEFAULT_TYPE):
     data = initialize_data()
     today = datetime.datetime.now(TASHKENT_TZ).strftime("%Y-%m-%d")
     for user_id, info in data["users"].items():
-        # Check if balance is below threshold
         if info["balance"] < 100000:
             last_notif = info.get("last_balance_notification", "")
             if last_notif == today:
-                continue  # already notified today
+                continue
             try:
-                msg = ("Hurmatli foydalanuvchi, sizning balansingiz hozirda "
-                       f"{info['balance']:,} so'm. Iltimos, tushlik uchun to'lovni amalga oshiring yoki balansingizni to'ldiring.\n"
-                       "Rahmat!")
+                msg = (f"Hurmatli foydalanuvchi, sizning balansingiz {info['balance']:,} so'mga yetdi.\n"
+                       "Iltimos, balansingizni to'ldiring. Rahmat!")
                 await context.bot.send_message(chat_id=user_id, text=msg)
                 data["users"][user_id]["last_balance_notification"] = today
             except Exception as e:
                 logger.error(f"Failed to send low balance notification to user {user_id}: {e}")
     save_data(data)
 
+# Legacy admin reminder function (optional)
 async def remind_debtors(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Legacy function – you may remove or repurpose
     uid = str(update.effective_user.id)
     admins = initialize_admins()
     if uid not in admins["admins"]:
@@ -689,14 +722,13 @@ async def remind_debtors(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not debtors:
         await update.message.reply_text("Hech kimda balans muammosi yo'q.")
         return
-    sent = 0
-    failed = 0
-    for uid, info in debtors:
+    sent, failed = 0, 0
+    for user_id, info in debtors:
         try:
-            await context.bot.send_message(chat_id=uid, text=f"Balansingiz: {info['balance']:,} so'm. Iltimos, balansingizni to'ldiring!")
+            await context.bot.send_message(chat_id=user_id, text=f"Sizning balansingiz: {info['balance']:,} so'm.")
             sent += 1
         except Exception as e:
-            logger.error(f"Failed to send reminder to user {uid}: {e}")
+            logger.error(f"Failed to send reminder to user {user_id}: {e}")
             failed += 1
     await update.message.reply_text(f"✅ {sent} ta foydalanuvchiga eslatma yuborildi.\n❌ {failed} ta yuborilmadi.")
 
@@ -735,9 +767,9 @@ async def show_admin_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE
         reply_markup=ReplyKeyboardMarkup(
             [
                 ["👥 Foydalanuvchilar", "💰 Barcha balanslar"],
-                ["Balans qo'shish", "Balans kamaytirish"],
-                ["Kunlik narx", "📊 Bugungi qatnashuv"],
-                ["🔄 Balanslarni nollash", "Kassa"],
+                ["➕Balans qo'shish", "➖Balans kamaytirish"],
+                ["💲Kunlik narx", "📊 Bugungi qatnashuv"],
+                ["🔄 Balanslarni nollash", "🏦Kassa"],
                 ["⬅️ Asosiy menyu", "❓ Yordam"],
             ],
             resize_keyboard=True,
@@ -766,7 +798,8 @@ async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ---------------------- Testing Command ---------------------- #
 
 async def test_survey(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_attendance_request(context)
+    # Bypass weekday check for testing
+    await send_attendance_request(context, test=True)
     await update.message.reply_text("Test survey yuborildi!")
 
 # ---------------------- Scheduled Low Balance Notification ---------------------- #
@@ -777,24 +810,22 @@ async def scheduled_low_balance_notification(context: ContextTypes.DEFAULT_TYPE)
 # ---------------------- Main Function ---------------------- #
 
 def main():
-    token = "7827859748:AAEDW4Dlmv49bGwps2-OyPcLS_ysEn4TmPU"  # Replace with your token
+    token = "7827859748:AAEDW4Dlmv49bGwps2-OyPcLS_ysEn4TmPU"
     application = Application.builder().token(token).build()
 
     # Registration conversation
     reg_conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            PHONE: [
-                MessageHandler(filters.CONTACT, phone),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, phone)
-            ],
+            PHONE: [MessageHandler(filters.CONTACT, phone),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, phone)],
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name)]
         },
         fallbacks=[CommandHandler("cancel", lambda update, context: ConversationHandler.END)]
     )
     application.add_handler(reg_conv)
 
-    # Admin balance modification conversation
+    # Admin Balance Modification conversation
     balance_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^(Balans qo'shish|Balans kamaytirish)$"), start_balance_modification)],
         states={
@@ -805,7 +836,7 @@ def main():
     )
     application.add_handler(balance_conv)
 
-    # Admin daily price modification conversation
+    # Admin Daily Price Modification conversation
     daily_price_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^Kunlik narx$"), start_daily_price_modification)],
         states={
@@ -849,25 +880,25 @@ def main():
 
     # Schedule daily jobs:
     now = datetime.datetime.now(TASHKENT_TZ)
-    # Survey at 7:00 AM on weekdays
+    # Schedule survey at 7:00 AM (weekdays)
     target_morning = now.replace(hour=7, minute=0, second=0, microsecond=0)
     if now >= target_morning:
         target_morning += datetime.timedelta(days=1)
     application.job_queue.run_once(send_attendance_request, (target_morning - now).total_seconds())
     application.job_queue.run_daily(send_attendance_request, time=datetime.time(hour=7, minute=0, second=0, tzinfo=TASHKENT_TZ))
-    # Summary at 10:00 AM on weekdays
+    # Schedule summary at 10:00 AM (weekdays)
     target_summary = now.replace(hour=10, minute=0, second=0, microsecond=0)
     if now >= target_summary:
         target_summary += datetime.timedelta(days=1)
     application.job_queue.run_once(send_attendance_summary, (target_summary - now).total_seconds())
     application.job_queue.run_daily(send_attendance_summary, time=datetime.time(hour=10, minute=0, second=0, tzinfo=TASHKENT_TZ))
-    # Low balance notification at 12:00 noon daily
+    # Schedule low balance notification at 12:00 noon daily
     target_notification = now.replace(hour=12, minute=0, second=0, microsecond=0)
     if now >= target_notification:
         target_notification += datetime.timedelta(days=1)
     application.job_queue.run_once(scheduled_low_balance_notification, (target_notification - now).total_seconds())
     application.job_queue.run_daily(scheduled_low_balance_notification, time=datetime.time(hour=12, minute=0, second=0, tzinfo=TASHKENT_TZ))
-
+    
     application.run_polling()
 
 if __name__ == "__main__":
